@@ -6,7 +6,7 @@ namespace lsm {
 
 GetResult SortedRun::Get(Slice key, uint64_t seq, std::string* value) {
   ParsedKey pkey(key, seq, RecordType::Value);
-  if(pkey < GetSmallestKey() || pkey > GetLargestKey()){
+  if(pkey > GetLargestKey()){
     return GetResult::kNotFound;
   }
   size_t lr = 0, rr = ssts_.size() - 1, mid;

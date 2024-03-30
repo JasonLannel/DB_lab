@@ -15,7 +15,9 @@ class IteratorHeap final : public Iterator {
   IteratorHeap() = default;
 
   void Push(T* it) {
-    heap_.push(std::move(it));
+    if(it->Valid()){
+      heap_.push(std::move(it));
+    }
   }
 
   void Build() {}

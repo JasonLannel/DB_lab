@@ -63,8 +63,11 @@ GetResult SSTable::Get(Slice key, uint64_t seq, std::string* value) {
   if(it.Valid()){
     auto find_key = ParsedKey(it.key());
     if(find_key.user_key_ == key && find_key.seq_ <= seq){
+      if(find_key.type_ == RecordType::Deletion){
+        return GetResult::kDelete;
+      }
       *value = it.value();
-      return find_key.type_ == RecordType::Value ? GetResult::kFound : GetResult::kDelete;
+      return GetResult::kFound;
     }
   }
   return GetResult::kNotFound;
