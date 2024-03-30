@@ -14,19 +14,40 @@ class IteratorHeap final : public Iterator {
  public:
   IteratorHeap() = default;
 
-  void Push(T* it) { DB_ERR("Not implemented!"); }
+  void Push(T* it) {
+    heap_.push(std::move(it));
+  }
 
-  void Build() { DB_ERR("Not implemented!"); }
+  void Build() {}
 
-  bool Valid() override { DB_ERR("Not implemented!"); }
+  bool Valid() override {
+    return !heap_.empty();
+  }
 
-  Slice key() override { DB_ERR("Not implemented!"); }
+  Slice key() override {
+    return heap_.top()->key();
+  }
 
-  Slice value() override { DB_ERR("Not implemented!"); }
+  Slice value() override {
+    return heap_.top()->value();
+  }
 
-  void Next() override { DB_ERR("Not implemented!"); }
+  void Next() override {
+    T* it = heap_.top();
+    heap_.pop();
+    it->Next();
+    if(it->Valid()){
+        heap_.push(it);
+    }
+  }
 
  private:
+  struct cmp{
+    bool operator () (T* a, T* b) const {
+        return ParsedKey(a->key()) >= ParsedKey(b->key());
+    }
+  };
+  std::priority_queue<T*, std::vector<T*>, cmp> heap_;
 };
 
 }  // namespace lsm

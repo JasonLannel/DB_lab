@@ -5,7 +5,13 @@ namespace wing {
 namespace lsm {
 
 bool Version::Get(std::string_view user_key, seq_t seq, std::string* value) {
-  DB_ERR("Not implemented!");
+  for(auto it : levels_){
+    auto res = it.Get(user_key, seq, value);
+    if(res == GetResult::kFound){
+      return true;
+    }
+  }
+  return false;
 }
 
 void Version::Append(
@@ -24,7 +30,29 @@ void Version::Append(uint32_t level_id, std::shared_ptr<SortedRun> sorted_run) {
 
 bool SuperVersion::Get(
     std::string_view user_key, seq_t seq, std::string* value) {
-  DB_ERR("Not implemented!");
+  GetResult res = mt_->Get(user_key, seq, value);
+  if(res != GetResult::kNotFound){
+    switch(res){
+      case GetResult::kFound:
+        return true;
+      case GetResult::kDelete:
+      default:
+        return false;
+    }
+  }
+  for(auto it = imms_->begin(); it != imms_->end(); ++it){
+    res = (*it)->Get(user_key, seq, value);
+    if(res != GetResult::kNotFound){
+      switch(res){
+        case GetResult::kFound:
+          return true;
+        case GetResult::kDelete:
+        default:
+          return false;
+      }
+    }
+  }
+  return version_->Get(user_key, seq, value);
 }
 
 std::string SuperVersion::ToString() const {
