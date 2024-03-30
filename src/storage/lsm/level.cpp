@@ -12,7 +12,9 @@ SortedRunIterator SortedRun::Seek(Slice key, uint64_t seq) {
   DB_ERR("Not implemented!");
 }
 
-SortedRunIterator SortedRun::Begin() { DB_ERR("Not implemented!"); }
+SortedRunIterator SortedRun::Begin() {
+  return SortedRunIterator(this, ssts_[0]->Begin(), 0u);
+}
 
 SortedRun::~SortedRun() {
   if (remove_tag_) {
@@ -22,15 +24,34 @@ SortedRun::~SortedRun() {
   }
 }
 
-void SortedRunIterator::SeekToFirst() { DB_ERR("Not implemented!"); }
+void SortedRunIterator::SeekToFirst() {
+  sst_id_ = 0u;
+  sst_it_ = run_->ssts_[sst_id_]->Begin();
+}
 
-bool SortedRunIterator::Valid() { DB_ERR("Not implemented!"); }
+bool SortedRunIterator::Valid() {
+  return sst_id_ != run_->ssts_.size();
+}
 
-Slice SortedRunIterator::key() { DB_ERR("Not implemented!"); }
+Slice SortedRunIterator::key() {
+  return sst_it_.key();
+}
 
-Slice SortedRunIterator::value() { DB_ERR("Not implemented!"); }
+Slice SortedRunIterator::value() {
+  return sst_it_.value();
+}
 
-void SortedRunIterator::Next() { DB_ERR("Not implemented!"); }
+void SortedRunIterator::Next() {
+  if(Valid()){
+    sst_it_.Next();
+    if(!sst_it_.Valid()){
+      ++sst_id_;
+      if(Valid()){
+        sst_it_ = run_->ssts_[sst_id_]->Begin();
+      }
+    }
+  }
+}
 
 GetResult Level::Get(Slice key, uint64_t seq, std::string* value) {
   for (int i = runs_.size() - 1; i >= 0; --i) {

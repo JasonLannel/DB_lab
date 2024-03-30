@@ -90,7 +90,9 @@ class SSTableIterator final : public Iterator {
  public:
   SSTableIterator() = default;
 
-  SSTableIterator(SSTable* sst) : sst_(sst), buf_(sst->block_size_, 4096) {}
+  SSTableIterator(SSTable* sst) : sst_(sst), buf_(sst->block_size_, 4096) {
+    block_id_ = sst_->index_.size();
+  }
 
   /* Move the the beginning */
   void SeekToFirst();
@@ -123,7 +125,9 @@ class SSTableBuilder {
       size_t bloom_bits_per_key)
     : writer_(std::move(writer)),
       block_builder_(block_size, writer_.get()),
-      bloom_bits_per_key_(bloom_bits_per_key) {}
+      bloom_bits_per_key_(bloom_bits_per_key) {
+        index_data_.resize(1);
+      }
 
   ~SSTableBuilder() = default;
 

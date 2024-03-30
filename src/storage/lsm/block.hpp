@@ -61,8 +61,7 @@ class BlockIterator final : public Iterator {
 
   /* data is a pointer to the beginning of the block. */
   BlockIterator(const char* data, BlockHandle handle) : data_(data) {
-    data_ += handle.offset_;
-    current_ptr_ = data_;
+    offset_ = data_ + handle.size_ - sizeof(offset_t) * handle.count_;
     count_ = handle.count_;
   }
 
@@ -82,7 +81,7 @@ class BlockIterator final : public Iterator {
 
  private:
   const char* data_{nullptr};
-  const char* current_ptr_{nullptr};
+  const char* offset_{nullptr};
   offset_t count_{0u};
   offset_t current_id_{0u};
 };
