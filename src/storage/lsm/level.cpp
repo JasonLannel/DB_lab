@@ -5,11 +5,36 @@ namespace wing {
 namespace lsm {
 
 GetResult SortedRun::Get(Slice key, uint64_t seq, std::string* value) {
-  DB_ERR("Not implemented!");
+  ParsedKey pkey(key, seq, RecordType::Value);
+  if(pkey < GetSmallestKey() || pkey > GetLargestKey()){
+    return GetResult::kNotFound;
+  }
+  size_t lr = 0, rr = ssts_.size() - 1, mid;
+  while(lr < rr){
+    mid = (lr + rr) >> 1;
+    if(ssts_[mid]->GetLargestKey() >= pkey) {
+      rr = mid;
+    }
+    else{
+      lr = mid + 1;
+    }
+  }
+  return ssts_[lr]->Get(key, seq, value);
 }
 
 SortedRunIterator SortedRun::Seek(Slice key, uint64_t seq) {
-  DB_ERR("Not implemented!");
+  ParsedKey pkey(key, seq, RecordType::Value);
+  size_t lr = 0, rr = ssts_.size() - 1, mid;
+  while(lr < rr){
+    mid = (lr + rr) >> 1;
+    if(ssts_[mid]->GetLargestKey() >= pkey) {
+      rr = mid;
+    }
+    else{
+      lr = mid + 1;
+    }
+  }
+  return SortedRunIterator(this, ssts_[lr]->Seek(key, seq), lr);
 }
 
 SortedRunIterator SortedRun::Begin() {
@@ -30,7 +55,7 @@ void SortedRunIterator::SeekToFirst() {
 }
 
 bool SortedRunIterator::Valid() {
-  return sst_id_ != run_->ssts_.size();
+  return sst_id_ != run_->ssts_.size() && sst_it_.Valid();
 }
 
 Slice SortedRunIterator::key() {
@@ -46,7 +71,7 @@ void SortedRunIterator::Next() {
     sst_it_.Next();
     if(!sst_it_.Valid()){
       ++sst_id_;
-      if(Valid()){
+      if(sst_id_ != run_->ssts_.size()){
         sst_it_ = run_->ssts_[sst_id_]->Begin();
       }
     }

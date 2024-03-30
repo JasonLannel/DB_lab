@@ -84,7 +84,11 @@ SSTableIterator SSTable::Begin() {
 
 void SSTableIterator::Seek(Slice key, uint64_t seq) {
   ParsedKey pkey(key, seq, RecordType::Value);
-  size_t lr = 0, rr = sst_->index_.size();
+  if(pkey > sst_->GetLargestKey()){
+    block_id_ = sst_->index_.size();
+    return;
+  }
+  size_t lr = 0, rr = sst_->index_.size() - 1;
   while(lr < rr){
     block_id_ = (lr + rr) >> 1;
     if(ParsedKey(sst_->index_[block_id_].key_) >= pkey) {
@@ -95,15 +99,10 @@ void SSTableIterator::Seek(Slice key, uint64_t seq) {
     }
   }
   block_id_ = lr;
-  if(Valid()){
-    BlockHandle handle = sst_->index_[block_id_].block_;
-    sst_->file_.get()->Read(buf_.data(), handle.size_, handle.offset_);
-    block_it_ = BlockIterator(buf_.data(), handle);
-    block_it_.Seek(key, seq);
-    if(!block_it_.Valid()){
-      block_id_ = sst_->index_.size();
-    }
-  }
+  BlockHandle handle = sst_->index_[block_id_].block_;
+  sst_->file_.get()->Read(buf_.data(), handle.size_, handle.offset_);
+  block_it_ = BlockIterator(buf_.data(), handle);
+  block_it_.Seek(key, seq);
 }
 
 void SSTableIterator::SeekToFirst() {
@@ -114,7 +113,7 @@ void SSTableIterator::SeekToFirst() {
 }
 
 bool SSTableIterator::Valid() {
-  return block_id_ != sst_->index_.size();
+  return block_id_ != sst_->index_.size() && block_it_.Valid();
 }
 
 Slice SSTableIterator::key() {
