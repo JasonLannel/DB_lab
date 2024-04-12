@@ -6,6 +6,7 @@ namespace lsm {
 
 std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
   DB_ERR("Not implemented!");
+  // Use target_runs only when trivial
 }
 
 std::unique_ptr<Compaction> TieredCompactionPicker::Get(Version* version) {
