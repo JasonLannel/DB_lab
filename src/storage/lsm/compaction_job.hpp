@@ -22,7 +22,37 @@ class CompactionJob {
    */
   template <typename IterT>
   std::vector<SSTInfo> Run(IterT&& it) {
-    DB_ERR("Not implemented!");
+    std::vector<SSTInfo> ssts;
+    while(it.Valid()){
+      auto file_info = file_gen_->Generate();
+      std::string file_name = file_info.first;
+      size_t file_id = file_info.second;
+      auto builder = SSTableBuilder(std::make_unique<FileWriter>(
+        std::make_unique<SeqWriteFile>(file_name, use_direct_io_), write_buffer_size_
+      ), block_size_, bloom_bits_per_key_);
+      while(it.Valid() && builder.size() <= sst_size_){
+        auto note_key = InternalKey(it.key());
+        auto note_value = it.value();
+        it.Next();
+        while(it.Valid()){
+          if(note_key.user_key() != InternalKey(it.key()).user_key()){
+            break;
+          }
+          it.Next();
+        }
+        builder.Append(ParsedKey(note_key), note_value);
+      }
+      builder.Finish();
+      ssts.emplace_back(SSTInfo{
+        builder.size(),
+        builder.count(),
+        file_id,
+        builder.GetIndexOffset(),
+        builder.GetBloomFilterOffset(),
+        file_name
+      });
+    }
+    return ssts;
   }
 
  private:

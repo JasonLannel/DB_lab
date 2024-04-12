@@ -47,13 +47,13 @@ void BlockIterator::SeekToFirst() {
   current_id_ = 0u;
 }
 
-Slice BlockIterator::key() {
+Slice BlockIterator::key() const {
   offset_t entry_offset = *reinterpret_cast<const offset_t*>(offset_ + sizeof(offset_t) * current_id_);
   offset_t key_length = *reinterpret_cast<const offset_t*>(data_ + entry_offset);
   return Slice(data_ + entry_offset + sizeof(offset_t), key_length);
 }
 
-Slice BlockIterator::value() {
+Slice BlockIterator::value() const {
   offset_t entry_offset = *reinterpret_cast<const offset_t*>(offset_ + sizeof(offset_t) * current_id_);
   offset_t key_length = *reinterpret_cast<const offset_t*>(data_ + entry_offset);
   offset_t value_length = *reinterpret_cast<const offset_t*>(data_ + entry_offset + sizeof(offset_t) + key_length);

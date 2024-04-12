@@ -119,11 +119,11 @@ bool SSTableIterator::Valid() {
   return block_id_ != sst_->index_.size() && block_it_.Valid();
 }
 
-Slice SSTableIterator::key() {
+Slice SSTableIterator::key() const {
   return block_it_.key();
 }
 
-Slice SSTableIterator::value() {
+Slice SSTableIterator::value() const {
   return block_it_.value();
 }
 

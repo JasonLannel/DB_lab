@@ -58,11 +58,11 @@ bool SortedRunIterator::Valid() {
   return sst_id_ != run_->ssts_.size() && sst_it_.Valid();
 }
 
-Slice SortedRunIterator::key() {
+Slice SortedRunIterator::key() const {
   return sst_it_.key();
 }
 
-Slice SortedRunIterator::value() {
+Slice SortedRunIterator::value() const {
   return sst_it_.value();
 }
 

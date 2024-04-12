@@ -26,11 +26,11 @@ class IteratorHeap final : public Iterator {
     return !heap_.empty();
   }
 
-  Slice key() override {
+  Slice key() const override {
     return heap_.top()->key();
   }
 
-  Slice value() override {
+  Slice value() const override {
     return heap_.top()->value();
   }
 

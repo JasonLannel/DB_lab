@@ -109,11 +109,11 @@ bool SuperVersionIterator::Valid() {
   return it_.Valid();
 }
 
-Slice SuperVersionIterator::key() {
+Slice SuperVersionIterator::key() const {
   return it_.key();
 }
 
-Slice SuperVersionIterator::value() {
+Slice SuperVersionIterator::value() const {
   return it_.value();
 }
 
