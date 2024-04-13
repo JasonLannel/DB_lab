@@ -38,7 +38,10 @@ SortedRunIterator SortedRun::Seek(Slice key, uint64_t seq) {
 }
 
 SortedRunIterator SortedRun::Begin() {
-  return SortedRunIterator(this, ssts_[0]->Begin(), 0u);
+  if(ssts_.size()){
+    return SortedRunIterator(this, ssts_[0]->Begin(), 0u);
+  }
+  return SortedRunIterator();
 }
 
 SortedRun::~SortedRun() {
@@ -51,10 +54,15 @@ SortedRun::~SortedRun() {
 
 void SortedRunIterator::SeekToFirst() {
   sst_id_ = 0u;
-  sst_it_ = run_->ssts_[sst_id_]->Begin();
+  if(run_){
+    sst_it_ = run_->ssts_[sst_id_]->Begin();
+  }
 }
 
 bool SortedRunIterator::Valid() {
+  if(!run_){
+    return false;
+  }
   return sst_id_ != run_->ssts_.size() && sst_it_.Valid();
 }
 

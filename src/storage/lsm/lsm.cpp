@@ -304,14 +304,6 @@ void DBImpl::CompactionThread() {
         compact_cv_.wait(lck);
         continue;
       }
-      if(compaction->src_level()){
-        // Avoid src_level is being compacted with others
-        // Level has compacted ssts; If others compact faster, 
-        // the compacted sst cannot be solved.
-        old_sv->GetVersion()
-              ->GetLevels()[compaction->src_level()].GetRuns()[0]
-              ->SetCompactionInProcess(true);
-      }
       for(auto it : compaction->input_ssts()){
         it->SetCompactionInProcess(true);
       }
@@ -320,7 +312,7 @@ void DBImpl::CompactionThread() {
       }
       compact_flag_ = true;
     }
-    std::shared_ptr<SortedRun> new_run;
+    std::vector<std::shared_ptr<SSTable>> compact_ssts;
     {
       db_mutex_.unlock();
       // Do compaction
@@ -349,8 +341,10 @@ void DBImpl::CompactionThread() {
       if(ssts.empty()){
         continue;
       }
-      new_run = std::make_shared<SortedRun>(
-        ssts, options_.block_size, options_.use_direct_io);
+      for(auto it : ssts){
+        compact_ssts.emplace_back(std::make_shared<SSTable>(
+          it, options_.block_size, options_.use_direct_io));
+      }
       db_mutex_.lock();
     }
     {
@@ -362,28 +356,54 @@ void DBImpl::CompactionThread() {
       for(auto &it : compaction->input_runs()){
         it->SetRemoveTag(true);
       }
-      if(compaction->src_level()){
-        old_sv->GetVersion()
-              ->GetLevels()[compaction->src_level()].GetRuns()[0]
-              ->SetCompactionInProcess(false);
-        // Pop sst to next level, then compaction complete!
-      }
       // Create a new superversion and install it
       auto mt = old_sv->GetMt();
       auto imm = old_sv->GetImms();
       auto new_version = std::make_shared<Version>();
+      std::shared_ptr<SortedRun> new_run;
+      int target_lev = compaction->target_level();
+      if(!compaction->target_sorted_run()){
+        new_run = std::make_shared<SortedRun>(
+                compact_ssts, options_.block_size, options_.use_direct_io);
+      }
+      else{
+        auto old_ssts = old_sv->GetVersion()->GetLevels()[target_lev].GetRuns()[0]->GetSSTs();
+        std::vector<std::shared_ptr<SSTable>> merge_ssts;
+        merge_ssts.reserve(old_ssts.size() + compact_ssts.size());
+        auto old_sst = old_ssts.begin();
+        while(old_sst != old_ssts.end() && (*old_sst)->GetLargestKey() < compact_ssts[0]->GetSmallestKey()){
+          if(!(*old_sst)->GetRemoveTag()){
+            merge_ssts.emplace_back(*old_sst);
+          }
+          ++old_sst;
+        }
+        for(auto& it : compact_ssts){
+          merge_ssts.emplace_back(std::move(it));
+        }
+        while(old_sst != old_ssts.end()){
+          if(!(*old_sst)->GetRemoveTag()){
+            merge_ssts.emplace_back(*old_sst);
+          }
+          ++old_sst;
+        }
+        new_run = std::make_shared<SortedRun>(
+                merge_ssts, options_.block_size, options_.use_direct_io);
+      }
       for (auto level : old_sv->GetVersion()->GetLevels()){
+        if(level.GetID() == target_lev){
+          new_version->Append(target_lev, new_run);
+          target_lev = -1;
+        }
         for(auto run : level.GetRuns()){
           if(run->GetRemoveTag()){
             continue;
           }
           // If under compaction, or != src_level(), leave it alone
-          if(run->GetCompactionInProcess() || level.GetID() != compaction->src_level()){
+          if(run->GetCompactionInProcess()){
             new_version->Append(level.GetID(), run);
             continue;
           }
           // Clear Removed sstable
-          // Impossible to being compacted; Level is tagged then.
           std::vector<std::shared_ptr<SSTable>> ssts;
           for(auto& sst : run->GetSSTs()){
             if(sst->GetRemoveTag()){
@@ -396,7 +416,9 @@ void DBImpl::CompactionThread() {
               ssts, options_.block_size, options_.use_direct_io));
         }
       }
-      new_version->Append(compaction->target_level(), new_run);
+      if(target_lev != -1){
+        new_version->Append(target_lev, new_run);
+      }
       auto new_sv = std::make_shared<SuperVersion>(
         std::move(mt), imm, new_version);
       DB_INFO("{}", new_sv->ToString());
