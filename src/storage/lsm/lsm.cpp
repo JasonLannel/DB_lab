@@ -314,75 +314,82 @@ void DBImpl::CompactionThread() {
     }
     std::vector<std::shared_ptr<SSTable>> compact_ssts;
     {
-      db_mutex_.unlock();
       // Do compaction
       // If trivial...
-      // Else, Merge with IteratorHeap
-      std::vector<SSTableIterator> sst_its;
-      for(auto it : compaction->input_ssts()){
-        sst_its.push_back(it->Begin());
+      if(compaction->is_trivial_move()){
+        compact_ssts = compaction->input_ssts();
       }
-      std::vector<SortedRunIterator> run_its;
-      for(auto it : compaction->input_runs()){
-        run_its.push_back(it->Begin());
+      else{
+        db_mutex_.unlock();
+        // Else, Merge with IteratorHeap
+        std::vector<SSTableIterator> sst_its;
+        for(auto it : compaction->input_ssts()){
+          sst_its.push_back(it->Begin());
+        }
+        std::vector<SortedRunIterator> run_its;
+        for(auto it : compaction->input_runs()){
+          run_its.push_back(it->Begin());
+        }
+        IteratorHeap<Iterator> it_heap;
+        for(size_t i = 0; i < sst_its.size(); ++i){
+          it_heap.Push(&sst_its[i]);
+        }
+        for(size_t i = 0; i < run_its.size(); ++i){
+          it_heap.Push(&run_its[i]);
+        }
+        it_heap.Build();
+        CompactionJob worker(filename_gen_.get(), options_.block_size,
+              options_.sst_file_size, options_.write_buffer_size,
+              options_.bloom_bits_per_key, options_.use_direct_io);
+        auto ssts = worker.Run(it_heap);
+        if(ssts.empty()){
+          continue;
+        }
+        for(auto it : ssts){
+          compact_ssts.emplace_back(std::make_shared<SSTable>(
+            it, options_.block_size, options_.use_direct_io));
+        }
+        db_mutex_.lock();
       }
-      IteratorHeap<Iterator> it_heap;
-      for(size_t i = 0; i < sst_its.size(); ++i){
-        it_heap.Push(&sst_its[i]);
-      }
-      for(size_t i = 0; i < run_its.size(); ++i){
-        it_heap.Push(&run_its[i]);
-      }
-      it_heap.Build();
-      CompactionJob worker(filename_gen_.get(), options_.block_size,
-            options_.sst_file_size, options_.write_buffer_size,
-            options_.bloom_bits_per_key, options_.use_direct_io);
-      auto ssts = worker.Run(it_heap);
-      if(ssts.empty()){
-        continue;
-      }
-      for(auto it : ssts){
-        compact_ssts.emplace_back(std::make_shared<SSTable>(
-          it, options_.block_size, options_.use_direct_io));
-      }
-      db_mutex_.lock();
     }
     {
-      // Tag Complete
-      auto old_sv = GetSV();
       for(auto &it : compaction->input_ssts()){
+        it->SetCompactionInProcess(false);
         it->SetRemoveTag(true);
       }
       for(auto &it : compaction->input_runs()){
+        it->SetCompactionInProcess(false);
         it->SetRemoveTag(true);
       }
       // Create a new superversion and install it
+      auto old_sv = GetSV();
       auto mt = old_sv->GetMt();
       auto imm = old_sv->GetImms();
       auto new_version = std::make_shared<Version>();
       std::shared_ptr<SortedRun> new_run;
-      int target_lev = compaction->target_level();
       if(!compaction->target_sorted_run()){
         new_run = std::make_shared<SortedRun>(
                 compact_ssts, options_.block_size, options_.use_direct_io);
       }
       else{
-        auto old_ssts = old_sv->GetVersion()->GetLevels()[target_lev].GetRuns()[0]->GetSSTs();
+        auto old_run = old_sv->GetVersion()
+                             ->GetLevels()[compaction->target_level()].GetRuns()[0];
+        auto old_ssts = old_run->GetSSTs();
         std::vector<std::shared_ptr<SSTable>> merge_ssts;
-        merge_ssts.reserve(old_ssts.size() + compact_ssts.size());
         auto old_sst = old_ssts.begin();
-        while(old_sst != old_ssts.end() && (*old_sst)->GetLargestKey() < compact_ssts[0]->GetSmallestKey()){
+        while(old_sst != old_ssts.end() && 
+          (*old_sst)->GetLargestKey() < compact_ssts[0]->GetSmallestKey()){
           if(!(*old_sst)->GetRemoveTag()){
-            merge_ssts.emplace_back(*old_sst);
+            merge_ssts.push_back(*old_sst);
           }
           ++old_sst;
         }
         for(auto& it : compact_ssts){
-          merge_ssts.emplace_back(std::move(it));
+          merge_ssts.push_back(std::move(it));
         }
         while(old_sst != old_ssts.end()){
           if(!(*old_sst)->GetRemoveTag()){
-            merge_ssts.emplace_back(*old_sst);
+            merge_ssts.push_back(*old_sst);
           }
           ++old_sst;
         }
@@ -390,20 +397,17 @@ void DBImpl::CompactionThread() {
                 merge_ssts, options_.block_size, options_.use_direct_io);
       }
       for (auto level : old_sv->GetVersion()->GetLevels()){
-        if(level.GetID() == target_lev){
-          new_version->Append(target_lev, new_run);
-          target_lev = -1;
+        if(level.GetID() == compaction->target_level()){
+          continue;
         }
         for(auto run : level.GetRuns()){
           if(run->GetRemoveTag()){
             continue;
           }
-          // If under compaction, or != src_level(), leave it alone
           if(run->GetCompactionInProcess()){
             new_version->Append(level.GetID(), run);
             continue;
           }
-          // Clear Removed sstable
           std::vector<std::shared_ptr<SSTable>> ssts;
           for(auto& sst : run->GetSSTs()){
             if(sst->GetRemoveTag()){
@@ -411,17 +415,19 @@ void DBImpl::CompactionThread() {
             }
             ssts.emplace_back(sst);
           }
-          new_version->Append(level.GetID(), 
-            std::make_shared<SortedRun>(
-              ssts, options_.block_size, options_.use_direct_io));
+          if(!ssts.empty()){
+            new_version->Append(level.GetID(), std::make_shared<SortedRun>(
+                ssts, options_.block_size, options_.use_direct_io));
+          }
         }
       }
-      if(target_lev != -1){
-        new_version->Append(target_lev, new_run);
+      if(compaction->is_trivial_move()){
+        compaction->input_ssts()[0]->SetRemoveTag(false);
       }
+      new_version->Append(compaction->target_level(), new_run);
       auto new_sv = std::make_shared<SuperVersion>(
         std::move(mt), imm, new_version);
-      DB_INFO("{}", new_sv->ToString());
+      //DB_INFO("{}", new_sv->ToString());
       InstallSV(std::move(new_sv));
     }
   }

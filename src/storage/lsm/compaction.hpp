@@ -36,6 +36,8 @@ class Compaction {
 
   int src_level() const { return src_level_; }
 
+  bool is_trivial_move() const { return is_trivial_move_; }
+
  private:
   /* The input SSTables */
   std::vector<std::shared_ptr<SSTable>> input_ssts_;
