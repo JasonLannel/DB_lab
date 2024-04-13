@@ -10,7 +10,6 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
     return nullptr;
   }
   std::priority_queue<std::pair<float, int>> lev_heap;
-  size_t size_limit = base_level_size_;
 
   auto level0_runs = levels[0].GetRuns();
   if(level0_runs.size() >= level0_compaction_trigger_){
@@ -33,13 +32,18 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
       lev_heap.push(std::make_pair(level0_runs.size() * 1.0f / level0_compaction_trigger_, -0));
     }
   }
-  for(size_t i = 1; i < levels.size(); ++i){
-    size_limit *= ratio_;
+  for(size_t i = 1, size_limit = base_level_size_; i < levels.size(); ++i, size_limit *= ratio_){
     auto leveln_run = levels[i].GetRuns()[0];
     if(leveln_run->GetCompactionInProcess() || leveln_run->GetRemoveTag()){
       continue;
     }
-    if(leveln_run->size() > size_limit){
+    size_t lev_size = 0u;
+    for (auto& sst : leveln_run->GetSSTs()) {
+      if(!sst->GetCompactionInProcess() && !sst->GetRemoveTag()){
+        lev_size += sst->GetSSTInfo().size_;
+      }
+    }
+    if(lev_size > size_limit){
       bool compact_ok = true;
       if(levels.size() > i + 1){
         auto levelnxt_run = levels[i+1].GetRuns()[0];
@@ -48,15 +52,7 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
         }
       }
       if(compact_ok){
-        size_t size = 0u;
-        for (auto& sst : leveln_run->GetSSTs()) {
-          if(!sst->GetCompactionInProcess() && !sst->GetRemoveTag()){
-            size += sst->GetSSTInfo().size_;
-          }
-        }
-        if(size > size_limit){
-          lev_heap.push(std::make_pair(size * 1.0f / size_limit, -i));
-        }
+        lev_heap.push(std::make_pair(lev_size * 1.0f / size_limit, -i));
       }
     }
   }
