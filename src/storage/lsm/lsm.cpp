@@ -282,7 +282,6 @@ void DBImpl::FlushThread() {
 }
 
 void DBImpl::CompactionThread() {
-  // DB_ERR("Not Implemented!");
   while (!stop_signal_) {
     std::unique_lock lck(db_mutex_);
     // Check if it has to stop. 
@@ -305,8 +304,21 @@ void DBImpl::CompactionThread() {
         compact_cv_.wait(lck);
         continue;
       }
+      if(compaction->src_level()){
+        // Avoid src_level is being compacted with others
+        // Level has compacted ssts; If others compact faster, 
+        // the compacted sst cannot be solved.
+        old_sv->GetVersion()
+              ->GetLevels()[compaction->src_level()].GetRuns()[0]
+              ->SetCompactionInProcess(true);
+      }
+      for(auto it : compaction->input_ssts()){
+        it->SetCompactionInProcess(true);
+      }
+      for(auto it : compaction->input_runs()){
+        it->SetCompactionInProcess(true);
+      }
       compact_flag_ = true;
-      // Do some other things
     }
     std::shared_ptr<SortedRun> new_run;
     {
@@ -323,11 +335,11 @@ void DBImpl::CompactionThread() {
         run_its.push_back(it->Begin());
       }
       IteratorHeap<Iterator> it_heap;
-      for(auto &it : sst_its){
-        it_heap.Push(&it);
+      for(size_t i = 0; i < sst_its.size(); ++i){
+        it_heap.Push(&sst_its[i]);
       }
-      for(auto &it : run_its){
-        it_heap.Push(&it);
+      for(size_t i = 0; i < run_its.size(); ++i){
+        it_heap.Push(&run_its[i]);
       }
       it_heap.Build();
       CompactionJob worker(filename_gen_.get(), options_.block_size,
@@ -342,17 +354,21 @@ void DBImpl::CompactionThread() {
       db_mutex_.lock();
     }
     {
-      // Create a new superversion and install it
+      // Tag Complete
+      auto old_sv = GetSV();
       for(auto &it : compaction->input_ssts()){
         it->SetRemoveTag(true);
       }
       for(auto &it : compaction->input_runs()){
         it->SetRemoveTag(true);
       }
-      if(compaction->target_sorted_run()){
-        compaction->target_sorted_run()->SetRemoveTag(true);
+      if(compaction->src_level()){
+        old_sv->GetVersion()
+              ->GetLevels()[compaction->src_level()].GetRuns()[0]
+              ->SetCompactionInProcess(false);
+        // Pop sst to next level, then compaction complete!
       }
-      auto old_sv = GetSV();
+      // Create a new superversion and install it
       auto mt = old_sv->GetMt();
       auto imm = old_sv->GetImms();
       auto new_version = std::make_shared<Version>();
@@ -361,6 +377,13 @@ void DBImpl::CompactionThread() {
           if(run->GetRemoveTag()){
             continue;
           }
+          // If under compaction, or != src_level(), leave it alone
+          if(run->GetCompactionInProcess() || level.GetID() != compaction->src_level()){
+            new_version->Append(level.GetID(), run);
+            continue;
+          }
+          // Clear Removed sstable
+          // Impossible to being compacted; Level is tagged then.
           std::vector<std::shared_ptr<SSTable>> ssts;
           for(auto& sst : run->GetSSTs()){
             if(sst->GetRemoveTag()){
@@ -378,7 +401,6 @@ void DBImpl::CompactionThread() {
         std::move(mt), imm, new_version);
       DB_INFO("{}", new_sv->ToString());
       InstallSV(std::move(new_sv));
-      compact_cv_.notify_one();
     }
   }
 }

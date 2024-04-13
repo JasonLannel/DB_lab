@@ -31,16 +31,15 @@ class CompactionJob {
         std::make_unique<SeqWriteFile>(file_name, use_direct_io_), write_buffer_size_
       ), block_size_, bloom_bits_per_key_);
       while(it.Valid() && builder.size() <= sst_size_){
-        auto note_key = InternalKey(it.key());
-        auto note_value = it.value();
+        builder.Append(ParsedKey(it.key()), it.value());
+        std::string dup_key{InternalKey(it.key()).user_key()};
         it.Next();
         while(it.Valid()){
-          if(note_key.user_key() != InternalKey(it.key()).user_key()){
+          if(dup_key != InternalKey(it.key()).user_key()){
             break;
           }
           it.Next();
         }
-        builder.Append(ParsedKey(note_key), note_value);
       }
       builder.Finish();
       ssts.emplace_back(SSTInfo{
