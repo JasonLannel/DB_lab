@@ -19,13 +19,17 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
       if(level1_runs->GetCompactionInProcess() || level1_runs->GetRemoveTag()){
         compact_ok = false;
       }
-    }
-    else {
-      for(auto& it : level0_runs){
-        if(it->GetCompactionInProcess()){
+      for(auto &sst : level1_runs->GetSSTs()){
+        if(sst->GetCompactionInProcess() || sst->GetRemoveTag()){
           compact_ok = false;
           break;
         }
+      }
+    }
+    for(auto& it : level0_runs){
+      if(it->GetCompactionInProcess() || it->GetRemoveTag()){
+        compact_ok = false;
+        break;
       }
     }
     if(compact_ok){
@@ -93,14 +97,14 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
             continue;
           }
           while(rp != targ_run_ssts.end() && (*rp)->GetSmallestKey() <= it->GetLargestKey()){
-            if((*rp)->GetCompactionInProcess()){
+            if((*rp)->GetCompactionInProcess() || (*rp)->GetRemoveTag()){
               ++in_compact_count;
             }
             overlap_size += (*rp)->GetSSTInfo().size_;
             ++rp;
           }
           while(lp != targ_run_ssts.end() && (*lp)->GetLargestKey() < it->GetSmallestKey()){
-            if((*lp)->GetCompactionInProcess()){
+            if((*lp)->GetCompactionInProcess() || (*lp)->GetRemoveTag()){
               --in_compact_count;
             }
             overlap_size -= (*lp)->GetSSTInfo().size_;
@@ -121,9 +125,7 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
           is_trivial_move = true;
         }
         while(best_l < best_r){
-          if(!(*best_l)->GetRemoveTag()){
-            input_ssts.emplace_back(*best_l);
-          }
+          input_ssts.emplace_back(*best_l);
           ++best_l;
         }
       }

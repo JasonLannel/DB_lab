@@ -427,7 +427,7 @@ void DBImpl::CompactionThread() {
       new_version->Append(compaction->target_level(), new_run);
       auto new_sv = std::make_shared<SuperVersion>(
         std::move(mt), imm, new_version);
-      //DB_INFO("{}", new_sv->ToString());
+      DB_INFO("{}", new_sv->ToString());
       InstallSV(std::move(new_sv));
     }
   }
