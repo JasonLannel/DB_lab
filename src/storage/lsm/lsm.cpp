@@ -318,11 +318,7 @@ void DBImpl::CompactionThread() {
     std::unique_ptr<Compaction> compaction;
     {
       auto old_sv = GetSV();
-      compaction = LeveledCompactionPicker(
-        options_.compaction_size_ratio,
-        options_.sst_file_size * 4,
-        options_.level0_compaction_trigger
-      ).Get(old_sv->GetVersion().get());
+      compaction = compaction_picker_->Get(old_sv->GetVersion().get());
       if (!compaction) {
         old_sv.reset();
         compact_flag_ = false;
