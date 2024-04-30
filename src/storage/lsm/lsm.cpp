@@ -32,7 +32,16 @@ DBImpl::DBImpl(const Options& options)
         std::make_unique<TieredCompactionPicker>(options_.compaction_size_ratio,
             options_.level0_compaction_trigger * options_.sst_file_size,
             options_.level0_compaction_trigger);
-  } else if (options_.compaction_strategy_name == "flexible") {
+  } else if (options_.compaction_strategy_name == "lazyleveling") {
+    compaction_picker_ = std::make_unique<LazyLevelingCompactionPicker>(
+        options_.compaction_size_ratio,
+        options_.level0_compaction_trigger * options_.sst_file_size,
+        options_.level0_compaction_trigger);
+  } else if (options_.compaction_strategy_name == "fluid") {
+    compaction_picker_ = std::make_unique<FluidCompactionPicker>(
+        options_.target_alpha_part3, options_.target_scan_length_part3,
+        options_.level0_compaction_trigger * options_.sst_file_size,
+        options_.level0_compaction_trigger);
   }
 
   threads_.emplace_back([&]() { FlushThread(); });
@@ -98,6 +107,22 @@ void DBImpl::Del(Slice key) {
   if (sv->GetMt()->size() > options_.sst_file_size) {
     SwitchMemtable();
   }
+}
+
+void DBImpl::DropAll() {
+  WaitForFlushAndCompaction();
+  std::unique_lock db_lck(db_mutex_);
+  auto sv = GetSV();
+  auto new_sv = std::make_shared<SuperVersion>(std::make_shared<MemTable>(),
+      std::make_shared<std::vector<std::shared_ptr<MemTable>>>(),
+      std::make_shared<Version>());
+  auto version = sv->GetVersion();
+  for (auto& level : version->GetLevels()) {
+    for (auto& sr : level.GetRuns()) {
+      sr->SetRemoveTag(true);
+    }
+  }
+  InstallSV(new_sv);
 }
 
 bool DBImpl::Get(Slice key, std::string* value) {
