@@ -335,6 +335,9 @@ void DBImpl::CompactionThread() {
       for(auto it : compaction->input_runs()){
         it->SetCompactionInProcess(true);
       }
+      if(compaction->target_sorted_run()){
+        compaction->target_sorted_run()->SetCompactionInProcess(true);
+      }
       compact_flag_ = true;
     }
     std::vector<std::shared_ptr<SSTable>> compact_ssts;
@@ -386,6 +389,9 @@ void DBImpl::CompactionThread() {
         it->SetCompactionInProcess(false);
         it->SetRemoveTag(true);
       }
+      if(compaction->target_sorted_run()){
+        compaction->target_sorted_run()->SetCompactionInProcess(false);
+      }
       // Create a new superversion and install it
       auto old_sv = GetSV();
       auto mt = old_sv->GetMt();
@@ -397,8 +403,7 @@ void DBImpl::CompactionThread() {
                 compact_ssts, options_.block_size, options_.use_direct_io);
       }
       else{
-        auto old_run = old_sv->GetVersion()
-                             ->GetLevels()[compaction->target_level()].GetRuns()[0];
+        auto old_run = compaction->target_sorted_run();
         auto old_ssts = old_run->GetSSTs();
         std::vector<std::shared_ptr<SSTable>> merge_ssts;
         auto old_sst = old_ssts.begin();
@@ -410,7 +415,7 @@ void DBImpl::CompactionThread() {
           ++old_sst;
         }
         for(auto& it : compact_ssts){
-          merge_ssts.push_back(std::move(it));
+          merge_ssts.push_back(it);
         }
         while(old_sst != old_ssts.end()){
           if(!(*old_sst)->GetRemoveTag()){
@@ -422,11 +427,8 @@ void DBImpl::CompactionThread() {
                 merge_ssts, options_.block_size, options_.use_direct_io);
       }
       for (auto level : old_sv->GetVersion()->GetLevels()){
-        if(level.GetID() == compaction->target_level()){
-          continue;
-        }
         for(auto run : level.GetRuns()){
-          if(run->GetRemoveTag()){
+          if(run->GetRemoveTag() || run == compaction->target_sorted_run()){
             continue;
           }
           if(run->GetCompactionInProcess()){

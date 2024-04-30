@@ -9,7 +9,8 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
   if(levels.empty()){
     return nullptr;
   }
-  std::priority_queue<std::pair<float, int>> lev_heap;
+  std::priority_queue<std::pair<float, int>> compact_queue;
+  //std::queue<std::pair<float, int>> compact_queue;
 
   auto level0_runs = levels[0].GetRuns();
   if(level0_runs.size() >= level0_compaction_trigger_){
@@ -33,10 +34,11 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
       }
     }
     if(compact_ok){
-      lev_heap.push(std::make_pair(level0_runs.size() * 1.0f / level0_compaction_trigger_, -0));
+      compact_queue.push(std::make_pair(level0_runs.size() * 1.0f / level0_compaction_trigger_, -0));
     }
   }
-  for(size_t i = 1, size_limit = base_level_size_; i < levels.size(); ++i, size_limit *= ratio_){
+  for(size_t i = 1, size_limit = base_level_size_; i < levels.size(); 
+        ++i, size_limit *= ratio_){
     auto leveln_run = levels[i].GetRuns()[0];
     if(leveln_run->GetCompactionInProcess() || leveln_run->GetRemoveTag()){
       continue;
@@ -56,13 +58,14 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
         }
       }
       if(compact_ok){
-        lev_heap.push(std::make_pair(lev_size * 1.0f / size_limit, -i));
+        compact_queue.push(std::make_pair(lev_size * 1.0f / size_limit, -i));
       }
     }
   }
-  while(!lev_heap.empty()){
-    size_t compact_lev = -lev_heap.top().second;
-    lev_heap.pop();
+  while(!compact_queue.empty()){
+    size_t compact_lev = -compact_queue.top().second;
+    //size_t compact_lev = -compact_queue.front().second;
+    compact_queue.pop();
     std::vector<std::shared_ptr<SSTable>> input_ssts;
     std::vector<std::shared_ptr<SortedRun>> input_runs;
     std::shared_ptr<SortedRun> target_sorted_run = nullptr;
@@ -137,7 +140,25 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
 }
 
 std::unique_ptr<Compaction> TieredCompactionPicker::Get(Version* version) {
-  DB_ERR("Not implemented!");
+  auto &levels = version->GetLevels();
+  auto &trigger = level0_compaction_trigger_;
+  for(size_t i = 0; i < levels.size()-1; ++i){
+    if(levels[i].size() > trigger){
+      bool compact_ok = true;
+      for(auto run : levels[i].GetRuns()){
+        if(run->GetCompactionInProcess() || run->GetRemoveTag()){
+          compact_ok = false;
+          break;
+        }
+      }
+      if(compact_ok){
+        std::vector<std::shared_ptr<SSTable>> input_ssts;
+        return std::make_unique<Compaction>(input_ssts, 
+          levels[i].GetRuns(), i, i + 1, nullptr, false);
+      }
+    }
+  }
+  return nullptr;
 }
 
 std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
@@ -146,7 +167,33 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
 
 std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
     Version* version) {
-  DB_ERR("Not implemented!");
+  auto &levels = version->GetLevels();
+  auto &trigger = level0_compaction_trigger_;
+  for(size_t i = 0; i < std::max(1ul, levels.size()-1); ++i){
+    if(levels[i].size() > trigger){
+      bool compact_ok = true;
+      for(auto run : levels[i].GetRuns()){
+        if(run->GetCompactionInProcess() || run->GetRemoveTag()){
+          compact_ok = false;
+          break;
+        }
+      }
+      if(compact_ok){
+        std::vector<std::shared_ptr<SSTable>> input_ssts;
+        return std::make_unique<Compaction>(input_ssts, 
+          levels[i].GetRuns(), i, i + 1, nullptr, false);
+      }
+    }
+  }
+  if(levels.size() > 1){
+    auto level_size = base_level_size_;
+    for(size_t i = levels.size(), r = ratio_; i; i>>=1){
+      if(i & 1){
+        level_size *= r;
+      }
+    }
+  }
+  return nullptr;
 }
 
 }  // namespace lsm
