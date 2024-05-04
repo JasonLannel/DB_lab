@@ -445,12 +445,14 @@ void DBImpl::CompactionThread() {
         }
       }
       if(compaction->is_trivial_move()){
-        compaction->input_ssts()[0]->SetRemoveTag(false);
+        for(auto it : compaction->input_ssts()){
+          it->SetRemoveTag(false);
+        }
       }
       new_version->Append(compaction->target_level(), new_run);
       auto new_sv = std::make_shared<SuperVersion>(
         std::move(mt), imm, new_version);
-      DB_INFO("{}", new_sv->ToString());
+      //DB_INFO("{}", new_sv->ToString());
       InstallSV(std::move(new_sv));
     }
   }

@@ -92,6 +92,12 @@ class FluidCompactionPicker final : public CompactionPicker {
   size_t base_level_size_{0};
   /* The maximum amount of sorted runs in Level 0 */
   size_t level0_compaction_trigger_{0};
+  /* Last time to change the strategy */
+  //std::clock_t last_t{0};
+  /* Current K */
+  size_t K_{0};
+  /* Calculate current optimal C and K, indicate whether to create new level*/
+  bool ChangeCK(Version *version);
 };
 
 }  // namespace lsm

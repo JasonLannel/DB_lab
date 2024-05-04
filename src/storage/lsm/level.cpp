@@ -23,6 +23,9 @@ GetResult SortedRun::Get(Slice key, uint64_t seq, std::string* value) {
 }
 
 SortedRunIterator SortedRun::Seek(Slice key, uint64_t seq) {
+  if(ssts_.empty()){
+    return Begin();
+  }
   ParsedKey pkey(key, seq, RecordType::Value);
   size_t lr = 0, rr = ssts_.size() - 1, mid;
   while(lr < rr){
