@@ -158,17 +158,21 @@ void FluidCompactionPicker::ChangeK(Version *version){
   size_t L = levels.size() - 1;
   size_t N = levels[L].size();
   size_t F = base_level_size_;
+  size_t key_number = 0;
+  for(auto sst : levels[L].GetRuns()[0]->GetSSTs()){
+    key_number += sst->GetSSTInfo().count_;
+  }
   size_t input_size = 0;
   for(auto lev : levels){
     input_size += lev.size();
   }
   size_t block_size = levels[L].GetRuns()[0]->block_size();
-  K_ = C_ = 2;
   double min_cost = __DBL_MAX__;
+  K_ = C_ = 2;
   for(size_t C = 2; C <= (N + F - 1) / F; ++C){
     for(size_t K = 2; K <= C; ++K){
       size_t Le = std::max(L*1., ceil(log(1.* N / F) / log(C)));
-      double cost = (Le - 1 + C) * input_size + alpha_ * block_size * ((K - 1) * (Le - 1) + 1);
+      double cost = (Le - 1 + C) + alpha_ * block_size * ((K - 1) * (Le - 1) + 1) * key_number / input_size;
       if(cost < min_cost){
         min_cost = cost;
         K_ = K;
@@ -176,32 +180,6 @@ void FluidCompactionPicker::ChangeK(Version *version){
       }
     }
   }
-  /*
-  size_t Lr = 2, Rr = (N + F - 1) / F;
-  while(Lr < Rr){
-    size_t M = (Lr + Rr) >> 1;
-    size_t C = (Lr + M) >> 1;
-    size_t Le = std::max(L*1., ceil(log(1.* N / F) / log(C)));
-    size_t K = std::max(2., Le > 2 ? ceil(log(1.* N / F / C) / log(Le - 1)): 2.);
-    double cost_L = (Le - 1 + C) * input_size + 
-      alpha_ * block_size * Y * ((K - 1) * (Le - 1) + 1);
-    C = (M + 1 + Rr) >> 1;
-    Le = std::max(L*1., ceil(log(1.* N / F) / log(C)));
-    K = std::max(2., Le > 2 ? ceil(log(1.* N / F / C) / log(Le - 1)): 2.);
-    double cost_R = (Le - 1 + C) * input_size + 
-      alpha_ * block_size * Y * ((K - 1) * (Le - 1) + 1);
-    if(cost_L < cost_R){
-      Rr = M;
-    }
-    else{
-      Lr = M + 1;
-    }
-  }
-  C_ = Lr;
-  size_t Le = std::max(L*1., ceil(log(1.* N / F) / log(C_)));
-  K_ = std::max(2., Le > 2 ? ceil(log(1.* N / F / C_) / log(Le - 1)): 2.);
-  */
-  //DB_INFO("K:{}, C:{}, Le:{}", K_, C_, Le);
 }
 
 void FluidCompactionPicker::ChangeKW(Version *version){
@@ -218,8 +196,8 @@ void FluidCompactionPicker::ChangeKW(Version *version){
     input_size += lev.size();
   }
   size_t block_size = levels[L].GetRuns()[0]->block_size();
-  K_ = C_ = 2;
   double min_cost = __DBL_MAX__;
+  K_ = C_ = 2;
   for(size_t C = 2; C <= (N + F - 1) / F; ++C){
     for(size_t K = 2; K <= C; ++K){
       size_t Le = std::max(L*1., ceil(log(1.* N / F) / log(C)));
@@ -233,7 +211,7 @@ void FluidCompactionPicker::ChangeKW(Version *version){
         }
         sz *= C;
       }
-      double cost = (Le - 1 + C) * input_size + alpha_ * r * block_size;
+      double cost = (Le - 1 + C) * input_size + alpha_ * r * block_size * key_number;
       if(cost < min_cost){
         min_cost = cost;
         K_ = K;
@@ -250,7 +228,11 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
   }
   size_t L = levels.size() - 1; 
   if(L >= 1){
-    ChangeKW(version);
+    ++last_t_;
+    if(last_t_ >= last_t_bound_){
+      ChangeK(version);
+      last_t_ = 0;
+    }
     // Handle rest of Level >= 1.
     size_t size_limit = base_level_size_;
     for(size_t i = 1; i < L; ++i){
@@ -271,7 +253,7 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
           }
         }
         return std::make_unique<Compaction>(input_ssts, 
-          levels[i].GetRuns(), i, i + 1, nullptr, false);
+          input_runs, i, i + 1, nullptr, false);
       }
     }
     // Handle Level L.
