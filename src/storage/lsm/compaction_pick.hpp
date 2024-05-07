@@ -79,9 +79,7 @@ class FluidCompactionPicker final : public CompactionPicker {
     : alpha_(alpha),
       scan_length_(scan_length),
       base_level_size_(base_level_size),
-      level0_compaction_trigger_(level0_compaction_trigger),
-      last_t_(64),
-      last_t_bound_(last_t_) {}
+      level0_compaction_trigger_(level0_compaction_trigger){}
 
   std::unique_ptr<Compaction> Get(Version* version) override;
 
@@ -94,14 +92,14 @@ class FluidCompactionPicker final : public CompactionPicker {
   size_t base_level_size_{0};
   /* The maximum amount of sorted runs in Level 0 */
   size_t level0_compaction_trigger_{0};
-  /* Compaction since last time to change the strategy */
-  size_t last_t_{0};
-  /* Bound of last_t*/
-  size_t last_t_bound_{16};
   /* Current K */
   size_t K_{2};
   /* Current C */
   size_t C_{2};
+  /* Target N*/
+  size_t target_N_{0};
+  /* Expand Ratio */
+  double predict_ratio_{1.5};
   /* Calculate current optimal C and K*/
   void ChangeK(Version *version);
   /* Calculate current optimal C and K, with filters*/
