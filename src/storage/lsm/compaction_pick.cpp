@@ -82,8 +82,10 @@ std::unique_ptr<Compaction> TieredCompactionPicker::Get(Version* version) {
   if(levels.empty()){
     return nullptr;
   }
+  size_t size_limit = base_level_size_;
   for(size_t i = 1; i < levels.size(); ++i){
-    if(levels[i].GetRuns().size() >= ratio_){
+    size_limit *= ratio_;
+    if(levels[i].GetRuns().size() >= ratio_ || levels[i].size() > size_limit){
       std::vector<std::shared_ptr<SSTable>> input_ssts;
       return std::make_unique<Compaction>(input_ssts, 
         levels[i].GetRuns(), i, i + 1, nullptr, false);
@@ -92,9 +94,12 @@ std::unique_ptr<Compaction> TieredCompactionPicker::Get(Version* version) {
   if(levels[0].GetRuns().size() >= level0_compaction_trigger_){
     std::vector<std::shared_ptr<SSTable>> input_ssts;
     std::vector<std::shared_ptr<SortedRun>> input_runs;
+    /*
     for(size_t i = 0; i < level0_compaction_trigger_; ++i){
       input_runs.push_back(levels[0].GetRuns()[i]);
     }
+    */
+    input_runs = levels[0].GetRuns();
     return std::make_unique<Compaction>(input_ssts, 
       input_runs, 0, 1, nullptr, false);
   }
@@ -109,8 +114,10 @@ std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
   }
   size_t L = levels.size() - 1; 
   if(L >= 1){
+    auto size_limit = base_level_size_;
     for(size_t i = 1; i < L; ++i){
-      if(levels[i].GetRuns().size() >= ratio_){
+      size_limit *= ratio_;
+      if(levels[i].GetRuns().size() >= ratio_ || levels[i].size() >= size_limit){
         std::vector<std::shared_ptr<SSTable>> input_ssts;
         if(i == L - 1){
           // Merge into Level L consisting of one SortedRun only.
@@ -124,13 +131,7 @@ std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
       }
     }
     // Handle Level L.
-    auto size_limit = base_level_size_;
-    for(size_t j = L, rt = ratio_; j; j>>=1){
-      if(j&1){
-        size_limit *= rt;
-      }
-      rt *= rt;
-    }
+    size_limit *= ratio_;
     if(levels[L].size() > size_limit){
       std::vector<std::shared_ptr<SortedRun>> input_runs;
       return std::make_unique<Compaction>(levels[L].GetRuns()[0]->GetSSTs(), 
@@ -141,9 +142,12 @@ std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
   if(levels[0].GetRuns().size() >= level0_compaction_trigger_){
     std::vector<std::shared_ptr<SSTable>> input_ssts;
     std::vector<std::shared_ptr<SortedRun>> input_runs;
+    /*
     for(size_t i = 0; i < level0_compaction_trigger_; ++i){
       input_runs.push_back(levels[0].GetRuns()[i]);
     }
+    */
+    input_runs = levels[0].GetRuns();
     if(L == 1){
       input_runs.push_back(levels[1].GetRuns()[0]);
     }
@@ -159,6 +163,15 @@ void FluidCompactionPicker::ChangeK(Version *version){
   if(levels[L].size() <= target_N_){
     return;
   }
+  size_t N = levels[L].size() * predict_ratio_;
+  size_t F = base_level_size_;
+  size_t input_size = N;
+  size_t key_number = 0;
+  for(auto sst : levels[L].GetRuns()[0]->GetSSTs()){
+    key_number += sst->GetSSTInfo().count_;
+  }
+  key_number *= predict_ratio_;
+  /*
   size_t F = base_level_size_;
   size_t key_number = 0;
   for(auto lev : levels){
@@ -175,6 +188,7 @@ void FluidCompactionPicker::ChangeK(Version *version){
   size_t N = input_size * predict_ratio_;
   key_number *= predict_ratio_;
   input_size *= predict_ratio_;
+  */
   size_t block_size = levels[L].GetRuns()[0]->block_size();
   double min_cost = __DBL_MAX__;
   K_ = C_ = 2;
@@ -188,7 +202,7 @@ void FluidCompactionPicker::ChangeK(Version *version){
         ++Le;
       }
       Le = std::max(Le, L);
-      double r = (K - 1) * (Le - 1) + 1 + level0_compaction_trigger_;
+      double r = (K - 1) * (Le - 1) + 1;
       double cost = (Le - 1 + C) * input_size + 
         alpha_ * block_size * r * key_number;
       if(cost < min_cost){
@@ -215,6 +229,24 @@ void FluidCompactionPicker::ChangeKW(Version *version){
     key_number += sst->GetSSTInfo().count_;
   }
   key_number *= predict_ratio_;
+  /*
+  size_t F = base_level_size_;
+  size_t key_number = 0;
+  for(auto lev : levels){
+    for(auto run : lev.GetRuns()){
+      for(auto sst : run->GetSSTs()){
+        key_number += sst->GetSSTInfo().count_;
+      }
+    }
+  }
+  size_t input_size = 0;
+  for(auto lev : levels){
+    input_size += lev.size();
+  }
+  size_t N = input_size * predict_ratio_;
+  key_number *= predict_ratio_;
+  input_size *= predict_ratio_;
+  */
   size_t block_size = levels[L].GetRuns()[0]->block_size();
   double min_cost = __DBL_MAX__;
   K_ = C_ = 2;
@@ -264,8 +296,8 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
     for(size_t i = 1; i < L; ++i){
       size_limit *= K_;
       //size_limit *= C_;
-      //if(levels[i].GetRuns().size() >= K_ || levels[i].size() > size_limit){
-      if(levels[i].GetRuns().size() >= K_){
+      if(levels[i].GetRuns().size() >= K_ || levels[i].size() > size_limit){
+      //if(levels[i].GetRuns().size() >= K_){
         std::vector<std::shared_ptr<SSTable>> input_ssts;
         std::vector<std::shared_ptr<SortedRun>> input_runs = levels[i].GetRuns();
         if(i == L - 1){
