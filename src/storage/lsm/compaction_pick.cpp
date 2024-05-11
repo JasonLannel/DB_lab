@@ -214,7 +214,6 @@ void FluidCompactionPicker::ChangeKW(Version *version){
   double beta = alpha_ * levels[L].GetRuns()[0]->block_size() * key_number / N;
   double min_cost = __DBL_MAX__;
   size_t opt_K = K_, opt_C = C_;
-  /*
   for(size_t K = 2; K <= std::max(2.,ceil(pow(0.5 * est_N / F, 1./(L - 1)))); ++K){
     size_t C = std::max(2., 1. * est_N / F / pow(K, L-1));
     double r = 0;
@@ -235,9 +234,6 @@ void FluidCompactionPicker::ChangeKW(Version *version){
       opt_C = C;
     }
   }
-  */
-  opt_K = std::max(2ul, (size_t)(beta * pow(1. * N / F / beta, 1. / L)));
-  opt_C = std::max(2ul, (size_t)(pow(1. * N / F / beta, 1. / L)));
   C_ = opt_C;
   if(abs(opt_K - K_) >= 2){
     K_ = opt_K;
