@@ -93,15 +93,15 @@ class FluidCompactionPicker final : public CompactionPicker {
   /* The maximum amount of sorted runs in Level 0 */
   size_t level0_compaction_trigger_{0};
   /* Current K */
-  size_t K_{2};
+  size_t K_{6};
   /* Current C */
-  size_t C_{2};
-  /* Target N*/
-  size_t target_N_{0};
-  /* Expand Ratio */
-  double predict_ratio_{1.5};
+  size_t C_{6};
+  /* Last time to update*/
+  clock_t last_update_time_{0};
+  /* Time bound to update, in sec*/
+  const double bound_sec_{5};
   /* Calculate current optimal C and K*/
-  void ChangeK(Version *version);
+  void UpdateKW(Version *version);
   /* Calculate current optimal C and K, with filters*/
   void ChangeKW(Version *version);
 };

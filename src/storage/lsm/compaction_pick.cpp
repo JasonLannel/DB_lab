@@ -17,7 +17,7 @@ std::unique_ptr<Compaction> LeveledCompactionPicker::Get(Version* version) {
   for(size_t i = 1, size_limit = base_level_size_; i < levels.size(); ++i){
     size_limit *= ratio_;
     auto leveln_run = levels[i].GetRuns()[0];
-    if(levels[i].size() > size_limit){
+    if(levels[i].size() >= size_limit){
       if(levels.size() == i + 1){
         input_ssts.push_back(leveln_run->GetSSTs()[0]);
         is_trivial_move = true;
@@ -85,7 +85,7 @@ std::unique_ptr<Compaction> TieredCompactionPicker::Get(Version* version) {
   size_t size_limit = base_level_size_;
   for(size_t i = 1; i < levels.size(); ++i){
     size_limit *= ratio_;
-    if(levels[i].GetRuns().size() >= ratio_ || levels[i].size() > size_limit){
+    if(levels[i].GetRuns().size() >= ratio_ || levels[i].size() >= size_limit){
       std::vector<std::shared_ptr<SSTable>> input_ssts;
       return std::make_unique<Compaction>(input_ssts, 
         levels[i].GetRuns(), i, i + 1, nullptr, false);
@@ -132,7 +132,7 @@ std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
     }
     // Handle Level L.
     size_limit *= ratio_;
-    if(levels[L].size() > size_limit){
+    if(levels[L].size() >= size_limit){
       std::vector<std::shared_ptr<SortedRun>> input_runs;
       return std::make_unique<Compaction>(levels[L].GetRuns()[0]->GetSSTs(), 
           input_runs, L, L + 1, nullptr, true);
@@ -157,130 +157,92 @@ std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
   return nullptr;
 }
 
-void FluidCompactionPicker::ChangeK(Version *version){
-  const std::vector<Level> &levels = version->GetLevels();
-  size_t L = levels.size() - 1;
-  if(levels[L].size() <= target_N_){
+void FluidCompactionPicker::UpdateKW(Version *version){
+  clock_t now = clock();
+  if((now - last_update_time_) / CLOCKS_PER_SEC <= bound_sec_){
     return;
   }
-  size_t N = levels[L].size() * predict_ratio_;
+  last_update_time_ = now;
+  const std::vector<Level> &levels = version->GetLevels();
+  size_t L = levels.size() - 1;
   size_t F = base_level_size_;
-  size_t input_size = N;
+  size_t N = levels[L].size();
+  double estimate_expand_ratio_{1.2};
+  size_t est_N = N * estimate_expand_ratio_;
   size_t key_number = 0;
   for(auto sst : levels[L].GetRuns()[0]->GetSSTs()){
     key_number += sst->GetSSTInfo().count_;
   }
-  key_number *= predict_ratio_;
-  /*
-  size_t F = base_level_size_;
-  size_t key_number = 0;
-  for(auto lev : levels){
-    for(auto run : lev.GetRuns()){
-      for(auto sst : run->GetSSTs()){
-        key_number += sst->GetSSTInfo().count_;
-      }
-    }
-  }
-  size_t input_size = 0;
-  for(auto lev : levels){
-    input_size += lev.size();
-  }
-  size_t N = input_size * predict_ratio_;
-  key_number *= predict_ratio_;
-  input_size *= predict_ratio_;
-  */
-  size_t block_size = levels[L].GetRuns()[0]->block_size();
+  double beta = alpha_ * levels[L].GetRuns()[0]->block_size() * key_number / N;
   double min_cost = __DBL_MAX__;
-  K_ = C_ = 2;
-  DB_INFO("INPUT_SIZE{}, BLOCK_SIZE{}, N{}, F{}", input_size, block_size, N, F);
-  for(size_t C = 2; C <= (N + F - 1) / F; ++C){
-    for(size_t K = 2; K <= (N + F - 1) / F; ++K){
-      double t = 1. * N / F / C;
-      size_t Le = 1;
-      while(t >= 1){
-        t /= K;
-        ++Le;
-      }
-      Le = std::max(Le, L);
-      double r = (K - 1) * (Le - 1) + 1;
-      double cost = (Le - 1 + C) * input_size + 
-        alpha_ * block_size * r * key_number;
-      if(cost < min_cost){
-        min_cost = cost;
-        K_ = K;
-        C_ = C;
-      }
+  size_t opt_K = K_, opt_C = C_;
+  for(size_t K = 2; K <= ceil(pow(0.5 * est_N / F, 1./(L - 1))); ++K){
+    size_t C = std::max(2., std::ceil(1. * est_N / F / pow(K, L-1)));
+    double r = K * (L - 1) + 1;
+    double cost = (L - 1 + C) + beta * r;
+    if(cost < min_cost){
+      min_cost = cost;
+      opt_K = K;
+      opt_C = C;
     }
   }
-  target_N_ = N;
+  C_ = opt_C;
+  if(abs(opt_K - K_) >= 2){
+    K_ = opt_K;
+  }
 }
 
 void FluidCompactionPicker::ChangeKW(Version *version){
-  const std::vector<Level> &levels = version->GetLevels();
-  size_t L = levels.size() - 1;
-  if(levels[L].size() <= target_N_){
+  if((clock() - last_update_time_) / CLOCKS_PER_SEC <= bound_sec_){
     return;
   }
-  size_t N = levels[L].size() * predict_ratio_;
+  const std::vector<Level> &levels = version->GetLevels();
+  size_t L = levels.size() - 1;
+  size_t N = levels[L].size();
   size_t F = base_level_size_;
-  size_t input_size = N;
+  const double estimate_expand_ratio_{1.2};
+  size_t est_N = N * estimate_expand_ratio_;
+  size_t total_sz = 0;
+  for(auto lev : levels){
+    total_sz += lev.size();
+  }
+  total_sz *= estimate_expand_ratio_;
   size_t key_number = 0;
   for(auto sst : levels[L].GetRuns()[0]->GetSSTs()){
     key_number += sst->GetSSTInfo().count_;
   }
-  key_number *= predict_ratio_;
-  /*
-  size_t F = base_level_size_;
-  size_t key_number = 0;
-  for(auto lev : levels){
-    for(auto run : lev.GetRuns()){
-      for(auto sst : run->GetSSTs()){
-        key_number += sst->GetSSTInfo().count_;
-      }
-    }
-  }
-  size_t input_size = 0;
-  for(auto lev : levels){
-    input_size += lev.size();
-  }
-  size_t N = input_size * predict_ratio_;
-  key_number *= predict_ratio_;
-  input_size *= predict_ratio_;
-  */
-  size_t block_size = levels[L].GetRuns()[0]->block_size();
+  double beta = alpha_ * levels[L].GetRuns()[0]->block_size() * key_number / N;
   double min_cost = __DBL_MAX__;
-  K_ = C_ = 2;
-  for(size_t C = 2; C <= (N + F - 1) / F; ++C){
-    for(size_t K = 2; K <= (N + F - 1) / F; ++K){
-      //size_t Le = std::max(L*1., ceil(log(1.* N / F) / log(C)));
-      double t = 1. * N / F / C;
-      size_t Le = 1;
-      while(t >= 1){
-        t /= K;
-        ++Le;
+  size_t opt_K = K_, opt_C = C_;
+  /*
+  for(size_t K = 2; K <= std::max(2.,ceil(pow(0.5 * est_N / F, 1./(L - 1)))); ++K){
+    size_t C = std::max(2., 1. * est_N / F / pow(K, L-1));
+    double r = 0;
+    total_sz = est_N + F * (pow(K, L+1) - K) / (K - 1);
+    for(size_t l = 1, sz = base_level_size_; l <= L; ++l){
+      if(l == L){
+        r += 1 - exp(-scan_length_ * est_N * 1. / total_sz);
       }
-      Le = std::max(Le, L);
-      double r = 0;
-      for(size_t l = 1, sz = base_level_size_; l <= Le; ++l){
-        if(l == Le){
-          r += 1 - exp(-scan_length_ * N * 1. / input_size);
-        }
-        else{
-          //r += (K - 1) * (1 - exp(-scan_length_ * sz * 1. / input_size / K));
-          r += (K - 1) * (1 - exp(-scan_length_ * sz * 1. / input_size));
-        }
-        //sz *= C;
-        sz *= K;
+      else{
+        r += K * (1 - exp(-scan_length_ * sz * 1. / total_sz));
       }
-      double cost = (Le - 1 + C) * input_size + alpha_ * block_size * r * key_number;
-      if(cost < min_cost){
-        min_cost = cost;
-        K_ = K;
-        C_ = C;
-      }
+      sz *= K;
+    }
+    double cost = (L - 1 + C) + beta * r;
+    if(cost < min_cost){
+      min_cost = cost;
+      opt_K = K;
+      opt_C = C;
     }
   }
-  target_N_ = N;
+  */
+  opt_K = std::max(2ul, (size_t)(beta * pow(1. * N / F / beta, 1. / L)));
+  opt_C = std::max(2ul, (size_t)(pow(1. * N / F / beta, 1. / L)));
+  C_ = opt_C;
+  if(abs(opt_K - K_) >= 2){
+    K_ = opt_K;
+  }
+  last_update_time_ = clock();
 }
 
 std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
@@ -289,15 +251,15 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
     return nullptr;
   }
   size_t L = levels.size() - 1; 
+  if(L >= 2){
+    UpdateKW(version);
+  }
   if(L >= 1){
-    ChangeK(version);
     // Handle rest of Level >= 1.
     size_t size_limit = base_level_size_;
     for(size_t i = 1; i < L; ++i){
       size_limit *= K_;
-      //size_limit *= C_;
-      if(levels[i].GetRuns().size() >= K_ || levels[i].size() > size_limit){
-      //if(levels[i].GetRuns().size() >= K_){
+      if(levels[i].GetRuns().size() >= K_ || levels[i].size() >= size_limit){
         std::vector<std::shared_ptr<SSTable>> input_ssts;
         std::vector<std::shared_ptr<SortedRun>> input_runs = levels[i].GetRuns();
         if(i == L - 1){
@@ -306,21 +268,13 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
           return std::make_unique<Compaction>(input_ssts, 
             input_runs, i, i + 1, nullptr, false);
         }
-        /*
-        if(levels[i+1].size()){
-          auto run = levels[i+1].GetRuns().back();
-          if(run->size() < size_limit * C_ / K_){
-            input_runs.push_back(run);
-          }
-        }
-        */
         return std::make_unique<Compaction>(input_ssts, 
           input_runs, i, i + 1, nullptr, false);
       }
     }
     // Handle Level L.
     size_limit *= C_;
-    if(levels[L].size() > size_limit){
+    if(levels[L].size() >= size_limit){
       std::vector<std::shared_ptr<SortedRun>> input_runs;
       return std::make_unique<Compaction>(levels[L].GetRuns()[0]->GetSSTs(), 
           input_runs, L, L + 1, nullptr, true);
@@ -330,25 +284,10 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
   if(levels[0].GetRuns().size() >= level0_compaction_trigger_){
     std::vector<std::shared_ptr<SSTable>> input_ssts;
     std::vector<std::shared_ptr<SortedRun>> input_runs;
-    /*
-    for(size_t i = 0; i < level0_compaction_trigger_; ++i){
-      input_runs.push_back(levels[0].GetRuns()[i]);
-    }
-    */
    input_runs = levels[0].GetRuns();
     if(L == 1){
       input_runs.push_back(levels[L].GetRuns()[0]);
     }
-    /*
-    else if(L > 1){
-      if(levels[1].size()){
-        auto run = levels[1].GetRuns().back();
-        if(run->size() < base_level_size_ * C_ / K_){
-          input_runs.push_back(run);
-        }
-      }
-    }
-    */
     return std::make_unique<Compaction>(input_ssts, 
       input_runs, 0, 1, nullptr, false);
   }
