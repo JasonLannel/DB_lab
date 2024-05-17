@@ -47,16 +47,12 @@ class HashJoinVecExecutor : public VecExecutor {
         }
         build_ret = ch_->Next();
       }
-      OutputSchema hash_schema;
       for(size_t id = 0; id < left_hash_exprs_.size(); ++id){
         left_hash_exprs_[id].Evaluate(build_table_.GetCols(), 
             build_table_.size(), build_table_keys_[id]);
       }
       hash_map_.reserve(build_table_.size());
       for(size_t i = 0; i < build_table_.size(); ++i){
-        if(!build_table_.IsValid(i)){
-          continue;
-        }
         hash_map_[left_hash_(i)].push_back(i);
       }
     }

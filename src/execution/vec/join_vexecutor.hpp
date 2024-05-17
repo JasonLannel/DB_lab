@@ -42,18 +42,20 @@ class JoinVecExecutor : public VecExecutor {
     if(probe_ret_.size()){
       TupleBatch ret;
       ret.Init(OutputSchema::Concat(left_schema_, right_schema_).GetTypes(), max_batch_size_);
+      std::vector<StaticFieldRef> LR_data;
+      LR_data.reserve(left_schema_.size() + right_schema_.size());
       while(probe_ret_.size()){
         while(build_table_idx_ < build_table_.size()){
           // All records in build_table_ is valid
           auto L = build_table_.GetSingleTuple(build_table_idx_);
+          LR_data.clear();
+          for(size_t i = 0; i < left_schema_.size(); ++i){
+            LR_data.emplace_back(L[i]);
+          }
           while(probe_ret_idx_ < probe_ret_.size()){
             if(probe_ret_.IsValid(probe_ret_idx_)){
               auto R = probe_ret_.GetSingleTuple(probe_ret_idx_);
-              std::vector<StaticFieldRef> LR_data;
-              LR_data.reserve(left_schema_.size() + right_schema_.size());
-              for(size_t i = 0; i < left_schema_.size(); ++i){
-                LR_data.emplace_back(L[i]);
-              }
+              LR_data.resize(left_schema_.size());
               for(size_t i = 0; i < right_schema_.size(); ++i){
                 LR_data.emplace_back(R[i]);
               }
