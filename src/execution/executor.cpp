@@ -6,6 +6,8 @@
 #include "execution/vec/print_vexecutor.hpp"
 #include "execution/vec/project_vexecutor.hpp"
 #include "execution/vec/seqscan_vexecutor.hpp"
+#include "execution/vec/join_vexecutor.hpp"
+#include "execution/vec/hashjoin_vexecutor.hpp"
 #include "execution/volcano/delete_executor.hpp"
 #include "execution/volcano/filter_executor.hpp"
 #include "execution/volcano/insert_executor.hpp"
@@ -46,6 +48,30 @@ std::unique_ptr<VecExecutor> InternalGenerateVec(
     return std::make_unique<PrintVecExecutor>(db.GetOptions().exec_options,
         print_plan->values_, print_plan->output_schema_,
         print_plan->num_fields_per_tuple_);
+  }
+
+  else if (plan->type_ == PlanType::Join) {
+    auto join_plan = static_cast<const JoinPlanNode*>(plan);
+    return std::make_unique<JoinVecExecutor>(
+      db.GetOptions().exec_options,
+      join_plan->predicate_.GenExpr(),
+      join_plan->ch_->output_schema_,
+      join_plan->ch2_->output_schema_,
+      InternalGenerateVec(join_plan->ch_.get(), db, txn_id),
+      InternalGenerateVec(join_plan->ch2_.get(), db, txn_id));
+  }
+  
+  else if (plan->type_ == PlanType::HashJoin) {
+    auto hashjoin_plan = static_cast<const HashJoinPlanNode*>(plan);
+    return std::make_unique<HashJoinVecExecutor>(
+      db.GetOptions().exec_options,
+      hashjoin_plan->predicate_.GenExpr(),
+      hashjoin_plan->left_hash_exprs_,
+      hashjoin_plan->right_hash_exprs_,
+      hashjoin_plan->ch_->output_schema_,
+      hashjoin_plan->ch2_->output_schema_,
+      InternalGenerateVec(hashjoin_plan->ch_.get(), db, txn_id),
+      InternalGenerateVec(hashjoin_plan->ch2_.get(), db, txn_id));
   }
 
   throw DBException("Unsupported plan node.");
