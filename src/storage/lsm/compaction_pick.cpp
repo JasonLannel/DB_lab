@@ -157,7 +157,7 @@ std::unique_ptr<Compaction> LazyLevelingCompactionPicker::Get(
   return nullptr;
 }
 
-void FluidCompactionPicker::UpdateKW(Version *version){
+void FluidCompactionPicker::UpdateKW_P2(Version *version){
   clock_t now = clock();
   if((now - last_update_time_) / CLOCKS_PER_SEC <= bound_sec_){
     return;
@@ -192,7 +192,7 @@ void FluidCompactionPicker::UpdateKW(Version *version){
   }
 }
 
-void FluidCompactionPicker::ChangeKW(Version *version){
+void FluidCompactionPicker::UpdateKW_P3(Version *version){
   if((clock() - last_update_time_) / CLOCKS_PER_SEC <= bound_sec_){
     return;
   }
@@ -200,24 +200,20 @@ void FluidCompactionPicker::ChangeKW(Version *version){
   size_t L = levels.size() - 1;
   size_t N = levels[L].size();
   size_t F = base_level_size_;
-  const double estimate_expand_ratio_{1.2};
+  size_t block_size = levels[L].GetRuns()[0]->block_size();
+  const double estimate_expand_ratio_{1.7};
   size_t est_N = N * estimate_expand_ratio_;
-  size_t total_sz = 0;
-  for(auto lev : levels){
-    total_sz += lev.size();
-  }
-  total_sz *= estimate_expand_ratio_;
   size_t key_number = 0;
   for(auto sst : levels[L].GetRuns()[0]->GetSSTs()){
     key_number += sst->GetSSTInfo().count_;
   }
-  double beta = alpha_ * levels[L].GetRuns()[0]->block_size() * key_number / N;
+  double beta = alpha_ * block_size * key_number / N;
   double min_cost = __DBL_MAX__;
   size_t opt_K = K_, opt_C = C_;
-  for(size_t K = 2; K <= std::max(2.,ceil(pow(0.5 * est_N / F, 1./(L - 1)))); ++K){
+  for(size_t K = 2; K <= ceil(pow(0.5 * est_N / F, 1./(L - 1))); ++K){
     size_t C = std::max(2., 1. * est_N / F / pow(K, L-1));
     double r = 0;
-    total_sz = est_N + F * (pow(K, L+1) - K) / (K - 1);
+    size_t total_sz = est_N + (pow(K, L+1)-K)/(K-1);
     for(size_t l = 1, sz = base_level_size_; l <= L; ++l){
       if(l == L){
         r += 1 - exp(-scan_length_ * est_N * 1. / total_sz);
@@ -248,7 +244,7 @@ std::unique_ptr<Compaction> FluidCompactionPicker::Get(Version* version) {
   }
   size_t L = levels.size() - 1; 
   if(L >= 2){
-    UpdateKW(version);
+    UpdateKW_P3(version);
   }
   if(L >= 1){
     // Handle rest of Level >= 1.

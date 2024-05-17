@@ -101,9 +101,9 @@ class FluidCompactionPicker final : public CompactionPicker {
   /* Time bound to update, in sec*/
   const double bound_sec_{5};
   /* Calculate current optimal C and K*/
-  void UpdateKW(Version *version);
+  void UpdateKW_P2(Version *version);
   /* Calculate current optimal C and K, with filters*/
-  void ChangeKW(Version *version);
+  void UpdateKW_P3(Version *version);
 };
 
 }  // namespace lsm
