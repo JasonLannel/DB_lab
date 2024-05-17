@@ -14,7 +14,7 @@ class JoinVecExecutor : public VecExecutor {
       std::unique_ptr<VecExecutor> ch,
       std::unique_ptr<VecExecutor> ch2)
     : VecExecutor(options),
-      predicate_(predicate.get(), OutputSchema::Concat(left_schema_, right_schema_)),
+      predicate_(predicate.get(), OutputSchema::Concat(left_input_schema, right_input_schema)),
       left_schema_(left_input_schema),
       right_schema_(right_input_schema),
       ch_(std::move(ch)),
