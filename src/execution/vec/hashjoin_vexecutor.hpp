@@ -29,7 +29,7 @@ class HashJoinVecExecutor : public VecExecutor {
         for(auto& expr : right_hash_exprs){
           right_hash_exprs_.emplace_back(ExprExecutor(expr.get(), right_input_schema));
         }
-      }
+  }
   void Init() override {
     ch_->Init();
     ch2_->Init();
@@ -112,6 +112,11 @@ class HashJoinVecExecutor : public VecExecutor {
     } else {
       return {};
     }
+  }
+  
+  virtual size_t GetTotalOutputSize() const override {
+    return ch_->GetTotalOutputSize() + ch2_->GetTotalOutputSize() +
+          stat_output_size_;
   }
 
  private:

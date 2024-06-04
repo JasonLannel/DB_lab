@@ -19,11 +19,13 @@ class JoinVecExecutor : public VecExecutor {
       right_schema_(right_input_schema),
       ch_(std::move(ch)),
       ch2_(std::move(ch2)) {}
+  
   void Init() override {
     ch_->Init();
     ch2_->Init();
     build_table_.Init(left_schema_.GetTypes(), max_batch_size_);
   }
+
   TupleBatch InternalNext() override {
     if(auto build_ret = ch_->Next(); build_ret.size() > 0){
       while(build_ret.size() > 0){
@@ -78,6 +80,11 @@ class JoinVecExecutor : public VecExecutor {
     } else {
       return {};
     }
+  }
+  
+  virtual size_t GetTotalOutputSize() const override {
+    return ch_->GetTotalOutputSize() + ch2_->GetTotalOutputSize() +
+          stat_output_size_;
   }
 
  private:
