@@ -20,7 +20,7 @@ namespace wing {
 class Instance::Impl {
  public:
   Impl(std::string_view db_file, WingOptions options)
-    : options_(options), db_(db_file, options) {}
+    : options_(options), db_(db_file, options_) {}
   void ExecuteShell() {
     auto& out = std::cout;
     auto& err = std::cerr;
@@ -169,7 +169,8 @@ class Instance::Impl {
             }
           } else {
             // Query
-            auto exe = GenerateExecutor(ret.GetPlan()->clone(), txn->txn_id_);
+            auto exe = GenerateExecutor(
+                OptimizePlan(ret.GetPlan()->clone()), txn->txn_id_);
             err << fmt::format(
                 "Generate executor in {} seconds.\n", watch.GetTimeInSeconds());
             auto output_schema = ret.GetPlan()->output_schema_;
@@ -211,12 +212,15 @@ class Instance::Impl {
           return ResultSet("", "");
         } else {
           // Query
-          auto exe = GenerateExecutor(ret.GetPlan()->clone(), txn_id);
-          auto output_schema = ret.GetPlan()->output_schema_;
-          // Release unused memory
-          ret.Clear();
+          auto plan = OptimizePlan(ret.GetPlan()->clone());
+          if (options_.debug_print_plan) {
+            DB_INFO("plan: \n {}", plan->ToString());
+          }
+          auto exe = GenerateExecutor(plan, txn_id);
+          auto output_schema = plan->output_schema_;
           auto result = GetResultFromExecutor(exe, output_schema);
-          return ResultSet(std::move(result));
+          return ResultSet(
+              std::move(result), exe->GetTotalOutputSize(), std::move(plan));
         }
       } catch (const DBException& e) {
         DB_INFO("{}", e.what());
@@ -239,6 +243,21 @@ class Instance::Impl {
       plan = CostBasedOptimizer::Optimize(std::move(plan), db_);
       return plan;
     }
+  }
+
+  void SetDebugPrintPlan(bool value) { options_.debug_print_plan = value; }
+
+  void SetEnablePredTrans(bool value) {
+    options_.exec_options.enable_predicate_transfer = value;
+  }
+
+  void SetEnableCostBased(bool value) {
+    options_.optimizer_options.enable_cost_based = value;
+  }
+
+  void SetTrueCardinalityHints(
+      const std::vector<std::pair<std::vector<std::string>, double>>& cards) {
+    options_.optimizer_options.true_cardinality_hints = cards;
   }
 
   // Refresh statistics.
@@ -402,7 +421,7 @@ class Instance::Impl {
   // immediately!! Because TupleStore in JitExecutor has been moved.
   TupleStore GetResultFromExecutor(
       std::unique_ptr<Executor>& exe, const OutputSchema& output_schema) {
-    if (options_.enable_jit_exec) {
+    if (options_.exec_options.style == "jit") {
       exe->Init();
       auto result = const_cast<TupleStore*>(
           reinterpret_cast<const TupleStore*>(exe->Next().Data()));
@@ -414,17 +433,20 @@ class Instance::Impl {
     }
   }
 
+  // Optimize a plan
+  std::unique_ptr<PlanNode> OptimizePlan(std::unique_ptr<PlanNode> plan) {
+    plan = LogicalOptimizer::Optimize(std::move(plan), db_);
+    plan = CostBasedOptimizer::Optimize(std::move(plan), db_);
+    return plan;
+  }
+
   // Generate executor by a logical plan.
   // This plan is released after executor is generated.
   std::unique_ptr<Executor> GenerateExecutor(
-      std::unique_ptr<PlanNode> plan, txn_id_t txn_id) {
+      const std::unique_ptr<PlanNode>& plan, txn_id_t txn_id) {
     std::unique_ptr<Executor> exe;
-    plan = LogicalOptimizer::Optimize(std::move(plan), db_);
-    plan = CostBasedOptimizer::Optimize(std::move(plan), db_);
-    if (options_.enable_jit_exec) {
+    if (options_.exec_options.style == "jit") {
       exe = JitExecutorGenerator::Generate(plan.get(), db_, txn_id);
-    } else if (options_.enable_vec_exec) {
-      exe = ExecutorGenerator::GenerateVec(plan.get(), db_, txn_id);
     } else {
       exe = ExecutorGenerator::Generate(plan.get(), db_, txn_id);
     }
@@ -549,6 +571,21 @@ void Instance::Analyze(std::string_view table_name) {
 }
 std::unique_ptr<PlanNode> Instance::GetPlan(std::string_view statement) {
   return ptr_->GetPlan(statement);
+}
+
+void Instance::SetDebugPrintPlan(bool value) { ptr_->SetDebugPrintPlan(value); }
+
+void Instance::SetEnablePredTrans(bool value) {
+  ptr_->SetEnablePredTrans(value);
+}
+
+void Instance::SetEnableCostBased(bool value) {
+  ptr_->SetEnableCostBased(value);
+}
+
+void Instance::SetTrueCardinalityHints(
+    const std::vector<std::pair<std::vector<std::string>, double>>& cards) {
+  ptr_->SetTrueCardinalityHints(cards);
 }
 
 TxnManager& Instance::GetTxnManager() { return ptr_->GetTxnManager(); }
