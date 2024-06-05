@@ -59,8 +59,8 @@ std::unique_ptr<VecExecutor> ExecutorGenerator::GenerateVec(
       join_plan->predicate_.GenExpr(),
       join_plan->ch_->output_schema_,
       join_plan->ch2_->output_schema_,
-      InternalGenerateVec(join_plan->ch_.get(), db, txn_id),
-      InternalGenerateVec(join_plan->ch2_.get(), db, txn_id));
+      GenerateVec(join_plan->ch_.get(), db, txn_id),
+      GenerateVec(join_plan->ch2_.get(), db, txn_id));
   }
   
   else if (plan->type_ == PlanType::HashJoin) {
@@ -72,8 +72,8 @@ std::unique_ptr<VecExecutor> ExecutorGenerator::GenerateVec(
       hashjoin_plan->right_hash_exprs_,
       hashjoin_plan->ch_->output_schema_,
       hashjoin_plan->ch2_->output_schema_,
-      InternalGenerateVec(hashjoin_plan->ch_.get(), db, txn_id),
-      InternalGenerateVec(hashjoin_plan->ch2_.get(), db, txn_id));
+      GenerateVec(hashjoin_plan->ch_.get(), db, txn_id),
+      GenerateVec(hashjoin_plan->ch2_.get(), db, txn_id));
   }
 
   throw DBException("Unsupported plan node.");
