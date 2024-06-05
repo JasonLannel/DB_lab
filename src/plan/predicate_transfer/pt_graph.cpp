@@ -41,8 +41,6 @@ void PtGraph::Dfs(const PlanNode* plan) {
     Dfs(hashjoin_plan->ch2_.get());
   } else if (plan->type_ == PlanType::SeqScan){
     table_scan_plans_[static_cast<const SeqScanPlanNode*>(plan)->table_name_in_sql_] = plan->clone();
-  } else if (plan->type_ == PlanType::RangeScan){
-    table_scan_plans_[static_cast<const RangeScanPlanNode*>(plan)->table_name_in_sql_] = plan->clone();
   } else if (plan->type_ == PlanType::Project){
     Dfs(plan->ch_.get());
   } else {

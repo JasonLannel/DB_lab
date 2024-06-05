@@ -29,6 +29,11 @@ class PtReducer {
   void PredicateTransfer(const std::string& table,
       const std::vector<const Expr*>& exprs,
       const std::vector<std::string>& filters);
+  
+  void Dfs(std::string table, 
+           size_t &id, 
+           std::map<std::string, size_t> dfs_order_,
+           std::vector<std::string> trans_order);
 
   /* Mappings from table name to bit vector. */
   std::map<std::string, std::shared_ptr<BitVector>> result_bv_;
