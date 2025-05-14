@@ -1,26 +1,6 @@
 # Wing
 
-## Clone and create your private repository
-
-1. Create a new empty repository [here](https://github.com/new) and **make sure that the visibility is private**. Note that repositories that are directly forked on Github can not be private. Here we denote the newly created repository as `git@github.com:your-id/your-repo.git`.
-
-2. Clone your repository
-
-```shell
-git clone git@github.com:your-id/your-repo.git wing
-cd wing
-```
-
-3. Pull code from our public repository, and push it to your private repository
-
-```shell
-git remote add public git@github.com:iidb/wing.git
-git pull public main
-git submodule update --init
-git push origin
-```
-
-If there are any updates to the lab framework, you can `git fetch public && git merge public/main` to merge the updates into your repository.
+This is an assignment of course Database Systems (Spring 24'). **If you are attending the course, never copying, no cheating! Every line of code should be written based on your understanding of this database demo.**
 
 ## Build
 
